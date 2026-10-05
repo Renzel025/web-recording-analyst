@@ -1,0 +1,31 @@
+# nginx site for the Recording Analyst. Replace DOMAIN, e.g. recordings.mybot.ink.
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/recording-analyst
+#   sudo sed -i 's/DOMAIN/recordings.mybot.ink/g' /etc/nginx/sites-available/recording-analyst
+#   sudo ln -sf /etc/nginx/sites-available/recording-analyst /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d recordings.mybot.ink     # adds HTTPS
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name DOMAIN;
+
+    # Recordings are uploaded here by test-automation (phone runs reach ~15 MB).
+    client_max_body_size 200m;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8020;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # An answer through the `claude` CLI can take up to ~4 minutes.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}

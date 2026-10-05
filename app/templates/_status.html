@@ -1,0 +1,13 @@
+{% macro status_badge(status) -%}
+  <span class="status status-{{ status }}">
+    {%- if status == 'pass' -%}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M4.5 8.2l2.2 2.2 4.6-4.8" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Pass
+    {%- elif status == 'fail' -%}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M5.5 5.5l5 5m0-5l-5 5" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>Fail
+    {%- elif status == 'warn' -%}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 4.5v4.2M8 11.2v.3" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>Not confirmed
+    {%- else -%}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M5 8h6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>Unknown
+    {%- endif -%}
+  </span>
+{%- endmacro %}

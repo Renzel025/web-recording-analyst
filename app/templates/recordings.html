@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_status.html" import status_badge %}
+{% block content %}
+<div class="page-head">
+  <h1>Recordings <span class="muted count">{{ recs|length }}</span></h1>
+</div>
+
+<div class="card flush">
+  {% if recs %}
+  <div class="tbl-wrap">
+  <table class="tbl">
+    <thead><tr><th>Recorded</th><th>Result</th><th>Run</th><th>Variant</th><th>Length</th></tr></thead>
+    <tbody>
+      {% for r in recs %}
+        <tr class="row-link" onclick="location.href='/r/{{ r.slug }}'">
+          <td class="nowrap"><a href="/r/{{ r.slug }}">{{ r.created_at|local }}</a></td>
+          <td>{{ status_badge(r.status) }}</td>
+          <td>{{ r.title or 'Untitled run' }}</td>
+          <td>{{ r.variant or '—' }}</td>
+          <td class="num">{{ r.video_seconds|mmss if r.video_seconds else '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <div class="empty">
+      <p><strong>No recordings yet.</strong></p>
+      <p class="muted">When a test-automation run finishes, it uploads its video to <code>POST /api/recordings</code> and the link shows up here and in Lark.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

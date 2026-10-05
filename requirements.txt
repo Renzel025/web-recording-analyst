@@ -1,0 +1,12 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29
+jinja2>=3.1
+python-multipart>=0.0.9
+sqlalchemy>=2.0,<3.0
+python-dotenv>=1.0
+requests>=2.31
+# Assistant: Claude answers, Groq is the fallback (same chain as ai-avatar-app)
+anthropic>=0.125,<1.0
+groq>=1.0
+# Optional: oss2>=2.18 for STORAGE_BACKEND=oss
+pytest>=8.0

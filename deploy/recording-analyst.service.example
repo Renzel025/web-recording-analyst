@@ -1,0 +1,30 @@
+# systemd unit for the Recording Analyst. Same layout as lark-ops-ai.
+#   sudo cp deploy/recording-analyst.service.example /etc/systemd/system/recording-analyst.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now recording-analyst
+#   journalctl -u recording-analyst -n 50 --no-pager
+#
+# Port 8020 so it doesn't collide with lark-ops-ai on 8000.
+
+[Unit]
+Description=Recording Analyst (test-automation videos + AI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/root/web-recording-analyst
+EnvironmentFile=/root/web-recording-analyst/.env
+Environment=PYTHONUNBUFFERED=1
+# The `claude` CLI is installed per user under ~/.local/bin.
+Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal
+
+ExecStart=/root/web-recording-analyst/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8020 --log-level info --workers 1
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

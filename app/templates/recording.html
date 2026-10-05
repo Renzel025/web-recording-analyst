@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_status.html" import status_badge %}
+{% block title %}{{ rec.title or 'Recording' }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('assistant.css') }}">{% endblock %}
+{% block body_class %}chat-open{% endblock %}
+{% block topbar_right %}
+  <button class="chat-toggle" type="button" id="open-chat-btn" aria-controls="chat-panel">
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    Ask the assistant
+  </button>
+{% endblock %}
+{% block content %}
+<div class="run-head">
+  <div>
+    <a class="small" href="/">← All recordings</a>
+    <h1>{{ rec.title or 'Untitled run' }}</h1>
+    <div class="run-meta">
+      {{ status_badge(rec.status) }}
+      <span class="muted">{{ rec.created_at|local('%a %b %d %Y, %H:%M') }}</span>
+      {% if rec.variant %}<span class="muted">· {{ rec.variant }}</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="player">
+  {% set url = video_url(rec.video_key) %}
+  {% if url %}
+    <video id="player" src="{{ url }}" controls preload="metadata" playsinline></video>
+  {% else %}
+    <div class="video-empty"><p><strong>No video for this run.</strong></p></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {% include "_assistant.html" %}
+{% endblock %}

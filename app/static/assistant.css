@@ -1,0 +1,328 @@
+/* Assistant panel + robot, ported from ai-avatar-app/public/style.css.
+   It keeps the avatar's own dark look whatever theme the dashboard is in. */
+.hero-chat, .avatar-dock {
+  /* Built on the page's own tokens (style.css), so the panel follows light/dark with the page. */
+  --a-bg-deep: var(--bg);
+  --a-surface: var(--surface);
+  --a-surface-2: var(--surface-2);
+  --a-line: var(--border);
+  --a-line-strong: var(--border);
+  --a-text: var(--text);
+  --a-text-dim: var(--text-2);
+  --a-text-mute: var(--text-3);
+  --a-cyan: var(--accent);
+  --a-cyan-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --a-cyan-line: color-mix(in srgb, var(--accent) 35%, transparent);
+  --a-violet: var(--accent);
+  --a-emerald: var(--good);
+  --a-emerald-soft: color-mix(in srgb, var(--good) 15%, transparent);
+  --a-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* --- Robot dock ------------------------------------------------------------
+   Closed: parked under the "Ask the assistant" button, in a lane the page keeps
+   clear. Open: it moves into the top of the side panel. */
+.avatar-dock {
+  position: fixed;
+  top: calc(var(--topbar-h) + 8px);
+  right: 22px;
+  z-index: 101;
+  width: 180px;
+  height: 180px;
+}
+.avatar-dock .robot {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  transition: transform 0.25s ease;
+}
+.avatar-dock .robot:hover { transform: translateY(-4px); }
+.avatar-dock .robot:focus-visible { outline: 2px solid var(--a-cyan); outline-offset: 2px; border-radius: 16px; }
+.robot-3d { width: 100%; height: 100%; }
+.robot-3d canvas { display: block; width: 100% !important; height: 100% !important; }
+.avatar-glow {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  transform: translateX(-50%);
+  width: 62%;
+  height: 20%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(56, 189, 248, 0.34), transparent 70%);
+  filter: blur(14px);
+  pointer-events: none;
+}
+.robot.talking + .avatar-glow { background: radial-gradient(ellipse at center, rgba(192, 132, 252, 0.4), transparent 70%); }
+
+.avatar-status {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 160px;
+  margin-top: -6px;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  color: var(--a-text-mute);
+  font-family: var(--a-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+/* No idle caption; the label only appears for "Thinking…", "Listening…" and so on. */
+.avatar-status:not(.busy) { display: none; }
+.avatar-status.busy { color: var(--a-text); background: var(--a-surface); border-color: var(--a-cyan-line); }
+
+/* --- Side panel ------------------------------------------------------------------
+   Full height on the right, under the top bar. On wide screens it pushes the page
+   over instead of covering it; on narrow ones it slides over the page. */
+:root { --panel-w: 420px; --topbar-h: 52px; --chat-head-h: 60px; --stage-h: 196px; --robot-open: 180px; }
+
+.hero-chat {
+  position: fixed;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  width: min(var(--panel-w), 100vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--a-line-strong);
+  background: var(--a-surface);
+  box-shadow: -18px 0 44px -24px rgba(0, 0, 0, 0.35);
+  color: var(--a-text);
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+  visibility: hidden;
+  transform: translateX(100%);
+  transition: transform 0.25s ease, visibility 0.25s;
+}
+.hero-chat.open { visibility: visible; transform: none; }
+
+/* The robot moves into this space while the panel is open. */
+.chat-stage {
+  flex: none;
+  height: var(--stage-h);
+  background: radial-gradient(ellipse at 50% 80%, var(--a-cyan-soft), transparent 65%);
+  border-bottom: 1px solid var(--a-line);
+}
+.chat-open .avatar-dock {
+  top: calc(var(--topbar-h) + var(--chat-head-h) + 6px);
+  bottom: auto;
+  right: calc((min(var(--panel-w), 100vw) - var(--robot-open)) / 2);
+  width: var(--robot-open);
+  height: var(--robot-open);
+}
+.chat-open .avatar-status { width: auto; white-space: nowrap; margin-top: -26px; color: var(--a-text-dim); }
+.chat-open .avatar-status.busy { border-color: var(--a-cyan-line); background: var(--a-surface); }
+
+@media (min-width: 1000px) {
+  body.chat-open { padding-right: var(--panel-w); }
+  body.chat-open .topbar { margin-right: calc(-1 * var(--panel-w)); }
+}
+
+.hero-chat .chat-head {
+  flex: none;
+  height: var(--chat-head-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--a-surface-2);
+  border-bottom: 1px solid var(--a-line);
+}
+.chat-head-actions { display: flex; gap: 6px; }
+.chat-id { display: flex; align-items: center; gap: 10px; }
+.chat-id strong { display: block; font-size: 14px; }
+.chat-context { font-family: var(--a-mono); font-size: 10.5px; color: var(--a-text-mute); }
+.chat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--a-emerald); box-shadow: 0 0 0 4px var(--a-emerald-soft); }
+
+.chat-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--a-line);
+  background: transparent;
+  color: var(--a-text-dim);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.chat-close svg { width: 15px; height: 15px; }
+.chat-close:hover { color: var(--a-text); background: var(--a-surface-2); }
+#voice-btn.muted .wave { opacity: 0; }
+#voice-btn.muted { color: var(--a-text-mute); }
+
+.hero-chat .screen { flex: 1; padding: 16px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+
+.hero-chat .log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 4px 2px 10px;
+}
+.hero-chat .msg {
+  max-width: 88%;
+  padding: 10px 13px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.hero-chat .msg.user {
+  align-self: flex-end;
+  border-top-right-radius: 4px;
+  background: var(--a-cyan-soft);
+  border: 1px solid var(--a-cyan-line);
+  color: var(--a-text);
+}
+.hero-chat .msg.bot {
+  align-self: flex-start;
+  border-top-left-radius: 4px;
+  background: var(--a-surface-2);
+  border: 1px solid var(--a-line);
+  color: var(--a-text);
+}
+.hero-chat .msg.pending { color: var(--a-text-mute); animation: a-pulse 1.2s ease-in-out infinite; }
+@keyframes a-pulse { 50% { opacity: 0.45; } }
+.hero-chat .msg.error {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--critical) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--critical) 40%, transparent);
+  color: var(--a-text);
+}
+
+/* Runs a reply names, as chips under it. Status reads from the icon, not the colour alone. */
+.msg-actions { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 6px; max-width: 88%; margin: -2px 0 2px 10px; }
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--a-cyan-line);
+  background: var(--a-cyan-soft);
+  color: var(--a-cyan);
+  font-family: var(--a-mono);
+  font-size: 11px;
+  text-decoration: none;
+}
+.msg-action::before { content: "▶"; font-size: 9px; }
+.msg-action.status-fail::before { content: "✕"; color: var(--critical); font-size: 11px; }
+.msg-action.status-pass::before { content: "✓"; color: var(--good); font-size: 11px; }
+.msg-action:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--a-cyan); text-decoration: none; }
+
+.hero-chat .suggestions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 10px; }
+.hero-chat .suggestions button {
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--a-line);
+  background: var(--a-surface-2);
+  color: var(--a-text-dim);
+  font-family: var(--a-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.hero-chat .suggestions button:hover { color: var(--a-text); border-color: var(--a-cyan); }
+
+.chat-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 12px;
+  border: 1px solid var(--a-line);
+  background: var(--a-bg-deep);
+}
+.chat-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--a-text);
+  font-family: var(--a-mono);
+  font-size: 12.5px;
+}
+.chat-form input:focus { outline: none; }
+.chat-form input::placeholder { color: var(--a-text-mute); }
+#mic-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--a-line);
+  background: var(--a-surface-2);
+  color: var(--a-text-dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+#mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#mic-btn.listening { border-color: var(--a-violet); color: var(--a-violet); }
+.chat-form button[type="submit"] {
+  flex: none;
+  padding: 9px 16px;
+  border-radius: 9px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Room for the parked robot. The page is centred at max 1400px, so on wide screens
+   the robot fits in the empty margin and nothing is reserved; on narrower ones the
+   page gives up only the part of the 210px lane the margin can't cover. */
+@media (min-width: 621px) {
+  body:not(.chat-open) .content { padding-right: clamp(24px, calc(234px - (100vw - 1400px) / 2), 210px); }
+}
+
+/* Phones: no room for a lane, so the robot parks in the bottom corner instead. */
+@media (max-width: 620px) {
+  .avatar-dock { top: auto; bottom: 8px; right: 8px; width: 110px; height: 110px; }
+  .avatar-status { display: none; }
+  .chat-open .avatar-status.busy { display: block; }
+  :root { --stage-h: 176px; --robot-open: 160px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-chat, .avatar-dock .robot { transition: none; }
+}
+
+/* Times in a reply ([0:42]) become buttons that jump the video. */
+.hero-chat .ts {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--a-cyan-line);
+  background: var(--a-cyan-soft);
+  color: var(--a-cyan);
+  font-family: var(--a-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+.hero-chat .ts:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--a-cyan); }
+
+.frames-note {
+  flex: none;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--a-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
