@@ -14,6 +14,12 @@
       Test Automation Recordings
     </a>
     {% block topbar_right %}{% endblock %}
+    {% if request.state.user %}
+      <div class="topbar-user">
+        <span class="muted">{{ request.state.user.name }}</span>
+        <a href="/logout">Log out</a>
+      </div>
+    {% endif %}
   </header>
 
   <main class="content">

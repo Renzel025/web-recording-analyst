@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Log in{% endblock %}
 {% block content %}
-<form class="card login" method="post" action="/login">
+<div class="card login">
   <h1>Log in</h1>
-  <p class="muted">Enter the team password to view recordings.</p>
-  <input type="hidden" name="next" value="{{ next }}">
-  <input type="password" name="password" placeholder="Team password" autocomplete="current-password" autofocus required>
-  {% if error %}<p class="login-error" role="alert">Wrong password.</p>{% endif %}
-  <button class="btn" type="submit">Log in</button>
-</form>
+  <p class="muted">Recordings are for our team only. Log in with your Lark account.</p>
+  {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
+  {% if ready %}
+    <a class="lark-btn" href="/auth/lark?next={{ next|urlencode }}">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 6.5l7.6 5.2L21 4.5l-6.4 14.2-3.3-5.1L3 6.5z" fill="currentColor"/></svg>
+      Log in with Lark
+    </a>
+  {% else %}
+    <p class="login-error" role="alert">Lark login isn't set up on this server yet.</p>
+  {% endif %}
+</div>
 {% endblock %}

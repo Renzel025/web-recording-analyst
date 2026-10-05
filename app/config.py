@@ -32,9 +32,12 @@ OSS_URL_EXPIRES = int(_env("OSS_URL_EXPIRES", "3600"))
 PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 # Required by POST /api/recordings (header X-Auth-Token). Empty = uploads refused.
 INGEST_API_TOKEN = _env("INGEST_API_TOKEN")
-# Team password for every page, video and chat (uploads use INGEST_API_TOKEN instead).
-# Empty = locked: every page, video and chat answers 503.
-SITE_PASSWORD = _env("SITE_PASSWORD")
+# "Log in with Lark" for every page, video and chat (uploads use INGEST_API_TOKEN instead).
+# App ID / Secret come from the Lark developer console. Without them the site answers 503.
+LARK_APP_ID = _env("LARK_APP_ID")
+LARK_APP_SECRET = _env("LARK_APP_SECRET")
+# Our Lark organisation; logins from any other one are refused. The first login shows it.
+LARK_TENANT_KEY = _env("LARK_TENANT_KEY")
 
 DISPLAY_TZ = _env("DISPLAY_TZ", "Asia/Manila")
 

@@ -274,8 +274,12 @@ input[type="search"] { width: 240px; max-width: 100%; }
 /* --- Login ---------------------------------------------------------------------- */
 .login { max-width: 360px; margin: 48px auto; display: flex; flex-direction: column; gap: 12px; }
 .login p { margin: 0; }
-.login input[type="password"] {
-  font: inherit; color: var(--text); background: var(--surface);
-  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
-}
 .login-error { color: var(--critical); }
+.lark-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: #3370ff; color: #fff; font-weight: 550; border-radius: 8px; padding: 10px 14px;
+}
+.lark-btn:hover { text-decoration: none; background: #245bdb; }
+.topbar-user { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; white-space: nowrap; }
+.chat-toggle + .topbar-user { margin-left: 12px; }
+@media (max-width: 640px) { .topbar-user .muted { display: none; } }

@@ -2,6 +2,7 @@ import importlib
 import json
 import shutil
 import subprocess
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -21,14 +22,17 @@ def video(tmp_path_factory):
     return path
 
 
-PASSWORD = "team-secret"
+TENANT = "t_our_company"
+ALICE = {"open_id": "ou_alice", "name": "Alice", "tenant_key": TENANT}
 
 
 @pytest.fixture()
 def client(request, tmp_path, monkeypatch):
-    # Logged in by default; parametrize indirectly with "logged_out" or "no_password".
+    # Logged in by default; parametrize indirectly with "logged_out", "no_lark" or "no_tenant".
     mode = getattr(request, "param", "logged_in")
-    monkeypatch.setenv("SITE_PASSWORD", "" if mode == "no_password" else PASSWORD)
+    monkeypatch.setenv("LARK_APP_ID", "" if mode == "no_lark" else "cli_test")
+    monkeypatch.setenv("LARK_APP_SECRET", "" if mode == "no_lark" else "lark-secret")
+    monkeypatch.setenv("LARK_TENANT_KEY", "" if mode == "no_tenant" else TENANT)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("LOCAL_STORAGE_DIR", str(tmp_path / "videos"))
@@ -46,10 +50,20 @@ def client(request, tmp_path, monkeypatch):
     app.storage.get_storage.cache_clear()
     from fastapi.testclient import TestClient
 
+    # Stand in for Lark: whatever code comes back belongs to the user in c.lark_user.
+    monkeypatch.setattr(app.main, "_lark_user", lambda code: c.lark_user)
     with TestClient(app.main.app) as c:
+        c.lark_user = ALICE
         if mode == "logged_in":
-            assert c.post("/login", data={"password": PASSWORD}).status_code == 200
+            assert _lark_login(c).status_code == 303
         yield c
+
+
+def _lark_login(client, next="/"):
+    """Click "Log in with Lark", then come back from Lark with a code."""
+    r = client.get("/auth/lark", params={"next": next}, follow_redirects=False)
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+    return client.get("/auth/lark/callback", params={"code": "c0de", "state": state}, follow_redirects=False)
 
 
 REPORT = "Duration: 1m 40s\nEnter Casino Plus ✅\nEnter provider game ✅\nPlace bet ❌\nBet history ❌ no record\n\nThe bet tap never registered."
@@ -114,8 +128,7 @@ def test_chat_without_provider_says_so(client, video):
 
 @pytest.mark.parametrize("client", ["logged_out"], indirect=True)
 def test_login_locks_pages_videos_and_chat(client, video):
-    body = _upload(client, video).json()  # uploads only need the token
-    slug = body["id"]
+    slug = _upload(client, video).json()["id"]  # uploads only need the token
     for path in ("/", f"/r/{slug}"):
         r = client.get(path, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"] == f"/login?next={path}"
@@ -123,11 +136,12 @@ def test_login_locks_pages_videos_and_chat(client, video):
     assert client.get(f"/media/recordings/{slug}.mp4").status_code == 401
     assert client.post(f"/api/recordings/{slug}/chat", json={"message": "hi"}).status_code == 401
     assert client.get("/healthz").status_code == 200
+    assert "Log in with Lark" in client.get("/login").text
 
-    assert client.post("/login", data={"password": "wrong"}).status_code == 401
-    r = client.post("/login", data={"password": PASSWORD, "next": f"/r/{slug}"}, follow_redirects=False)
+    r = _lark_login(client, next=f"/r/{slug}")
     assert r.status_code == 303 and r.headers["location"] == f"/r/{slug}"
-    assert client.get(f"/r/{slug}").status_code == 200
+    page = client.get(f"/r/{slug}")
+    assert page.status_code == 200 and "Alice" in page.text
     assert client.get(f"/media/recordings/{slug}.mp4").status_code == 200
 
     client.get("/logout")
@@ -135,15 +149,53 @@ def test_login_locks_pages_videos_and_chat(client, video):
 
 
 @pytest.mark.parametrize("client", ["logged_out"], indirect=True)
+def test_lark_authorize_link_goes_to_lark_with_our_app(client):
+    r = client.get("/auth/lark", follow_redirects=False)
+    url = urlparse(r.headers["location"])
+    q = parse_qs(url.query)
+    assert url.netloc == "accounts.larksuite.com"
+    assert q["client_id"] == ["cli_test"]
+    assert q["redirect_uri"] == ["http://mac.local:8000/auth/lark/callback"]
+
+
+@pytest.mark.parametrize("client", ["logged_out"], indirect=True)
+def test_other_organisation_is_refused(client):
+    client.lark_user = {"open_id": "ou_mallory", "name": "Mallory", "tenant_key": "t_someone_else"}
+    r = _lark_login(client)
+    assert r.status_code == 403 and "Only members of our Lark organisation" in r.text
+    assert client.get("/api/recordings/x").status_code == 401
+
+
+@pytest.mark.parametrize("client", ["logged_out"], indirect=True)
+def test_callback_without_our_state_is_refused(client):
+    client.get("/auth/lark", follow_redirects=False)
+    r = client.get("/auth/lark/callback", params={"code": "c0de", "state": "forged"}, follow_redirects=False)
+    assert r.status_code == 403
+    assert client.get("/api/recordings/x").status_code == 401
+
+
+@pytest.mark.parametrize("client", ["logged_out"], indirect=True)
+def test_forged_session_cookie_is_refused(client):
+    client.cookies.set("ra_session", "eyJpZCI6ICJvdV94In0=.deadbeef")
+    assert client.get("/api/recordings/x").status_code == 401
+
+
+@pytest.mark.parametrize("client", ["logged_out"], indirect=True)
 def test_login_never_redirects_off_site(client):
     for target in ("//evil.com", "/\\evil.com", "https://evil.com"):
-        r = client.post("/login", data={"password": PASSWORD, "next": target}, follow_redirects=False)
-        assert r.headers["location"] == "/"
+        assert _lark_login(client, next=target).headers["location"] == "/"
 
 
-@pytest.mark.parametrize("client", ["no_password"], indirect=True)
-def test_no_password_keeps_everything_locked(client, video):
+@pytest.mark.parametrize("client", ["no_tenant"], indirect=True)
+def test_first_login_shows_the_tenant_key_to_configure(client):
+    client.cookies.clear()
+    r = _lark_login(client)
+    assert r.status_code == 403 and f"LARK_TENANT_KEY={TENANT}" in r.text
+    assert client.get("/api/recordings/x").status_code == 401
+
+
+@pytest.mark.parametrize("client", ["no_lark"], indirect=True)
+def test_without_lark_app_everything_stays_locked(client, video):
     slug = _upload(client, video).json()["id"]  # automation keeps working
     for path in ("/", f"/r/{slug}", f"/api/recordings/{slug}", f"/media/recordings/{slug}.mp4"):
         assert client.get(path, follow_redirects=False).status_code == 503
-    assert client.post("/login", data={"password": ""}).status_code == 401

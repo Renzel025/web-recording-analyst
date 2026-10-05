@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -7,7 +8,9 @@ import shutil
 import time
 from datetime import timezone
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+
+import requests
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -60,29 +63,58 @@ templates.env.globals.update(video_url=video_url, DISPLAY_TZ=config.DISPLAY_TZ, 
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
-    if not config.SITE_PASSWORD:
-        log.warning("SITE_PASSWORD is not set: every page, video and chat answers 503 until it is")
+    if not _lark_ready():
+        log.warning("LARK_APP_ID / LARK_APP_SECRET not set: every page, video and chat answers 503 until they are")
+    elif not config.LARK_TENANT_KEY:
+        log.warning("LARK_TENANT_KEY not set: nobody can log in yet; the first Lark login shows the key to copy")
 
 
-# --- Login -------------------------------------------------------------------
-# One shared team password. The cookie holds an HMAC of it, so changing
-# SITE_PASSWORD logs everyone out.
+# --- Login with Lark -------------------------------------------------------------
+# OAuth 2.0 against Lark. Only people whose Lark organisation (tenant_key) matches
+# LARK_TENANT_KEY get in. The session cookie is a payload signed with the app secret,
+# so rotating LARK_APP_SECRET logs everyone out.
 
 SESSION_COOKIE = "ra_session"
+STATE_COOKIE = "ra_lark_state"
 SESSION_DAYS = 30
+LARK_AUTHORIZE_URL = "https://accounts.larksuite.com/open-apis/authen/v1/authorize"
+LARK_TOKEN_URL = "https://open.larksuite.com/open-apis/authen/v2/oauth/token"
+LARK_USER_INFO_URL = "https://open.larksuite.com/open-apis/authen/v1/user_info"
 
 
-def _session_value() -> str:
-    return hmac.new(config.SITE_PASSWORD.encode(), b"recording-analyst-session", hashlib.sha256).hexdigest()
+def _lark_ready() -> bool:
+    return bool(config.LARK_APP_ID and config.LARK_APP_SECRET)
 
 
-def _logged_in(request: Request) -> bool:
-    return secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), _session_value())
+def _redirect_uri() -> str:
+    # Must be listed under Security Settings > Redirect URLs in the Lark developer console.
+    return f"{config.PUBLIC_BASE_URL}/auth/lark/callback"
+
+
+def _sign(payload: str) -> str:
+    return hmac.new(config.LARK_APP_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _session_value(user: dict) -> str:
+    data = {"id": user.get("open_id"), "name": user.get("name") or "", "exp": int(time.time()) + SESSION_DAYS * 86400}
+    payload = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+    return f"{payload}.{_sign(payload)}"
+
+
+def _current_user(request: Request) -> Optional[dict]:
+    payload, _, sig = request.cookies.get(SESSION_COOKIE, "").partition(".")
+    if not (_lark_ready() and payload and secrets.compare_digest(sig.encode(), _sign(payload).encode())):
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(payload))
+    except ValueError:
+        return None
+    return data if data.get("exp", 0) > time.time() else None
 
 
 def _is_open(request: Request) -> bool:
     path = request.url.path
-    if path in ("/login", "/healthz") or path.startswith("/static/"):
+    if path in ("/login", "/auth/lark", "/auth/lark/callback", "/healthz") or path.startswith("/static/"):
         return True
     # test-automation has no browser session; the upload checks X-Auth-Token itself.
     return path == "/api/recordings" and request.method == "POST"
@@ -91,21 +123,40 @@ def _is_open(request: Request) -> bool:
 @app.middleware("http")
 async def require_login(request: Request, call_next):
     # Covers the /media mount too, so videos can't be fetched without logging in.
-    if _is_open(request) or (config.SITE_PASSWORD and _logged_in(request)):
+    if _is_open(request):
         return await call_next(request)
-    if not config.SITE_PASSWORD:
-        # Fail closed: a deploy that forgot the password must not be public.
-        return PlainTextResponse("Locked: set SITE_PASSWORD in .env and restart.", status_code=503)
+    if not _lark_ready():
+        # Fail closed: a deploy without the Lark app must not be public.
+        return PlainTextResponse("Locked: set LARK_APP_ID and LARK_APP_SECRET in .env and restart.", status_code=503)
+    user = _current_user(request)
+    if user:
+        request.state.user = user
+        return await call_next(request)
     if request.url.path.startswith(("/api/", "/media/")):
         return JSONResponse({"detail": "Login required"}, status_code=401)
     return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
 
 
 def _safe_next(target: str) -> str:
-    """Only same-site paths, so /login?next=//evil.com can't bounce people elsewhere."""
+    """Only same-site paths, so ?next=//evil.com can't bounce people elsewhere."""
     if target.startswith("/") and not target.startswith(("//", "/\\")):
         return target
     return "/"
+
+
+def _lark_user(code: str) -> dict:
+    """Trade the one-time code for the user's token, then ask Lark who they are."""
+    tok = requests.post(LARK_TOKEN_URL, timeout=15, json={
+        "grant_type": "authorization_code", "client_id": config.LARK_APP_ID,
+        "client_secret": config.LARK_APP_SECRET, "code": code, "redirect_uri": _redirect_uri(),
+    }).json()
+    if not tok.get("access_token"):
+        raise RuntimeError(f"token exchange failed: {tok.get('code')} {tok.get('error_description') or tok.get('msg')}")
+    info = requests.get(LARK_USER_INFO_URL, timeout=15,
+                        headers={"Authorization": f"Bearer {tok['access_token']}"}).json()
+    if info.get("code") != 0:
+        raise RuntimeError(f"user_info failed: {info.get('code')} {info.get('msg')}")
+    return info["data"]
 
 
 def _status_from_report(report: str) -> str:
@@ -139,29 +190,69 @@ def recordings_page(request: Request):
 
 @app.get("/r/{slug}", response_class=HTMLResponse)
 def recording_page(request: Request, slug: str):
-    return templates.TemplateResponse(request, "recording.html", {"rec": _get(slug)})
+    rec = _get(slug)
+    log.info("view: %s opened %s", request.state.user.get("name"), slug)
+    return templates.TemplateResponse(request, "recording.html", {"rec": rec})
+
+
+def _login_page(request: Request, next: str = "/", error: str = "", status: int = 200):
+    return templates.TemplateResponse(
+        request, "login.html", {"next": _safe_next(next), "error": error, "ready": _lark_ready()}, status_code=status,
+    )
+
+
+def _cookie_args(request: Request) -> dict:
+    # Behind nginx uvicorn sees https via X-Forwarded-Proto; on the Mac's plain http the
+    # cookie must not be Secure or the browser would drop it.
+    return {"httponly": True, "samesite": "lax", "secure": request.url.scheme == "https"}
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
-    if not config.SITE_PASSWORD or _logged_in(request):
+    if _current_user(request):
         return RedirectResponse(_safe_next(next), status_code=303)
-    return templates.TemplateResponse(request, "login.html", {"next": _safe_next(next), "error": False})
+    return _login_page(request, next)
 
 
-@app.post("/login", response_class=HTMLResponse)
-def login(request: Request, password: str = Form(""), next: str = Form("/")):
-    target = _safe_next(next)
-    if not config.SITE_PASSWORD or not secrets.compare_digest(password.encode(), config.SITE_PASSWORD.encode()):
-        time.sleep(1)  # slows down password guessing
-        return templates.TemplateResponse(request, "login.html", {"next": target, "error": True}, status_code=401)
-    resp = RedirectResponse(target, status_code=303)
-    resp.set_cookie(
-        SESSION_COOKIE, _session_value(), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax",
-        # Behind nginx uvicorn sees https via X-Forwarded-Proto; on the Mac's plain http the
-        # cookie must not be Secure or the browser would drop it.
-        secure=request.url.scheme == "https",
-    )
+@app.get("/auth/lark")
+def lark_start(request: Request, next: str = "/"):
+    if not _lark_ready():
+        return _login_page(request, next, status=503)
+    state = secrets.token_urlsafe(16)
+    params = urlencode({"client_id": config.LARK_APP_ID, "redirect_uri": _redirect_uri(), "state": state})
+    resp = RedirectResponse(f"{LARK_AUTHORIZE_URL}?{params}", status_code=303)
+    # The state comes back on the callback; matching it proves the login started here.
+    resp.set_cookie(STATE_COOKIE, f"{state}|{_safe_next(next)}", max_age=600, **_cookie_args(request))
+    return resp
+
+
+@app.get("/auth/lark/callback", response_class=HTMLResponse)
+def lark_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    expected, _, target = request.cookies.get(STATE_COOKIE, "").partition("|")
+    if not _lark_ready():
+        return _login_page(request, status=503)
+    if error or not code:
+        return _login_page(request, target, "Lark login was cancelled.", 403)
+    if not expected or not secrets.compare_digest(state.encode(), expected.encode()):
+        return _login_page(request, target, "That login link expired. Please try again.", 403)
+    try:
+        user = _lark_user(code)
+    except Exception:
+        log.exception("Lark login failed")
+        return _login_page(request, target, "Couldn't finish the Lark login. Please try again.", 502)
+
+    name, tenant = user.get("name") or user.get("open_id"), user.get("tenant_key") or ""
+    if not config.LARK_TENANT_KEY:
+        log.warning("Lark login by %s: set LARK_TENANT_KEY=%s in .env to let this organisation in", name, tenant)
+        return _login_page(request, target, f"Almost set up: add LARK_TENANT_KEY={tenant} to .env and restart.", 403)
+    if not secrets.compare_digest(tenant.encode(), config.LARK_TENANT_KEY.encode()):
+        log.warning("refused Lark login from another organisation: %s (tenant %s)", name, tenant)
+        return _login_page(request, target, "Only members of our Lark organisation can open recordings.", 403)
+
+    log.info("login: %s (%s)", name, user.get("open_id"))
+    resp = RedirectResponse(_safe_next(target), status_code=303)
+    resp.set_cookie(SESSION_COOKIE, _session_value(user), max_age=SESSION_DAYS * 86400, **_cookie_args(request))
+    resp.delete_cookie(STATE_COOKIE)
     return resp
 
 

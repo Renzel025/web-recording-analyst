@@ -137,7 +137,8 @@ Fill in these values:
 |---|---|---|
 | `PUBLIC_BASE_URL` | `https://recordings.mybot.ink` | The app builds the links it returns from this (`https://.../r/<id>`). If it's wrong, the links posted in Lark are wrong. |
 | `INGEST_API_TOKEN` | A long random string | The upload password. test-automation must send the same value. If it's empty, all uploads are refused (HTTP 503). Generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`, or reuse the Mac's. |
-| `SITE_PASSWORD` | A team password | **Required.** It protects every page, video and chat. Teammates type it once per browser and stay logged in for 30 days. Uploads don't use it, they use `INGEST_API_TOKEN`. If it's empty, the site stays locked and every page answers 503. Changing it logs everyone out. |
+| `LARK_APP_ID`, `LARK_APP_SECRET` | From your Lark app (see "Log in with Lark" below) | **Required.** Every page, video and chat needs a Lark login. Uploads don't, they use `INGEST_API_TOKEN`. If these are empty, the site stays locked and every page answers 503. |
+| `LARK_TENANT_KEY` | Leave empty at first | Your company's Lark organization. Logins from any other organization are refused. The first login shows the value to paste here. |
 | `ANTHROPIC_AUTH_TOKEN` | `sk-ant-oat...` | Your Claude subscription token. The app passes it to the `claude` CLI. |
 | `DISPLAY_TZ` | `Asia/Manila` (default) | The timezone used for dates on the pages. |
 | `STORAGE_BACKEND` | `local` (default) | Videos stay on the server disk. See "Optional: Alibaba OSS" below for cloud storage. |
@@ -278,7 +279,7 @@ sudo certbot --nginx -d recordings.mybot.ink
 ```
 
 If certbot asks whether to redirect HTTP to HTTPS, choose **redirect**. Without HTTPS, the
-team password and the videos travel unencrypted. To confirm the redirect is on:
+login cookie and the videos travel unencrypted. To confirm the redirect is on:
 
 ```bash
 curl -sI http://recordings.mybot.ink/ | head -3     # 301, Location: https://...
@@ -287,13 +288,37 @@ curl -sI http://recordings.mybot.ink/ | head -3     # 301, Location: https://...
 The certificate renews automatically. To test renewal: `sudo certbot renew --dry-run`.
 
 **Check it worked:** open `https://recordings.mybot.ink/` on your phone. You should see
-the login page, and after the team password, the recordings list. Check that the data
+the login page, and after **Log in with Lark**, the recordings list. Check that the data
 is locked without a login:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://recordings.mybot.ink/api/recordings/anything   # 401
 curl -s -o /dev/null -w '%{http_code}\n' https://recordings.mybot.ink/                          # 303 (to /login)
 ```
+
+---
+
+## Log in with Lark (one-time setup)
+
+People log in with their Lark account. Only your company's Lark organization gets in.
+You don't need a bot. Login only uses the app's ID, secret and redirect URL.
+
+1. Open the Lark Developer Console (open.larksuite.com) and **create a custom app**
+   (self-built app). If it asks for a capability, pick **Web App**, not Bot.
+2. **Credentials & Basic Info:** copy the **App ID** and **App Secret** into the
+   server's `.env` as `LARK_APP_ID` and `LARK_APP_SECRET`.
+3. **Security Settings → Redirect URLs:** add
+   `https://recordings.mybot.ink/auth/lark/callback`. It must match
+   `PUBLIC_BASE_URL` + `/auth/lark/callback` exactly.
+4. **Publish** the app inside your organization. Depending on your company's settings,
+   a Lark admin may need to approve it.
+5. Restart: `systemctl restart recording-analyst`.
+6. Open the site and click **Log in with Lark**. The first time, the page says
+   `add LARK_TENANT_KEY=... to .env`. Paste that line into `.env` and restart again.
+   From then on, only your organization can log in.
+
+Each login and each recording view is written to the log with the person's name:
+`journalctl -u recording-analyst | grep -E "login:|view:"`.
 
 ---
 
