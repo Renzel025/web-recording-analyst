@@ -1,12 +1,16 @@
+import hashlib
+import hmac
 import json
 import logging
 import secrets
 import shutil
+import time
 from datetime import timezone
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -56,6 +60,52 @@ templates.env.globals.update(video_url=video_url, DISPLAY_TZ=config.DISPLAY_TZ, 
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    if not config.SITE_PASSWORD:
+        log.warning("SITE_PASSWORD is not set: every page, video and chat answers 503 until it is")
+
+
+# --- Login -------------------------------------------------------------------
+# One shared team password. The cookie holds an HMAC of it, so changing
+# SITE_PASSWORD logs everyone out.
+
+SESSION_COOKIE = "ra_session"
+SESSION_DAYS = 30
+
+
+def _session_value() -> str:
+    return hmac.new(config.SITE_PASSWORD.encode(), b"recording-analyst-session", hashlib.sha256).hexdigest()
+
+
+def _logged_in(request: Request) -> bool:
+    return secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), _session_value())
+
+
+def _is_open(request: Request) -> bool:
+    path = request.url.path
+    if path in ("/login", "/healthz") or path.startswith("/static/"):
+        return True
+    # test-automation has no browser session; the upload checks X-Auth-Token itself.
+    return path == "/api/recordings" and request.method == "POST"
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    # Covers the /media mount too, so videos can't be fetched without logging in.
+    if _is_open(request) or (config.SITE_PASSWORD and _logged_in(request)):
+        return await call_next(request)
+    if not config.SITE_PASSWORD:
+        # Fail closed: a deploy that forgot the password must not be public.
+        return PlainTextResponse("Locked: set SITE_PASSWORD in .env and restart.", status_code=503)
+    if request.url.path.startswith(("/api/", "/media/")):
+        return JSONResponse({"detail": "Login required"}, status_code=401)
+    return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
+
+
+def _safe_next(target: str) -> str:
+    """Only same-site paths, so /login?next=//evil.com can't bounce people elsewhere."""
+    if target.startswith("/") and not target.startswith(("//", "/\\")):
+        return target
+    return "/"
 
 
 def _status_from_report(report: str) -> str:
@@ -90,6 +140,36 @@ def recordings_page(request: Request):
 @app.get("/r/{slug}", response_class=HTMLResponse)
 def recording_page(request: Request, slug: str):
     return templates.TemplateResponse(request, "recording.html", {"rec": _get(slug)})
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/"):
+    if not config.SITE_PASSWORD or _logged_in(request):
+        return RedirectResponse(_safe_next(next), status_code=303)
+    return templates.TemplateResponse(request, "login.html", {"next": _safe_next(next), "error": False})
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login(request: Request, password: str = Form(""), next: str = Form("/")):
+    target = _safe_next(next)
+    if not config.SITE_PASSWORD or not secrets.compare_digest(password.encode(), config.SITE_PASSWORD.encode()):
+        time.sleep(1)  # slows down password guessing
+        return templates.TemplateResponse(request, "login.html", {"next": target, "error": True}, status_code=401)
+    resp = RedirectResponse(target, status_code=303)
+    resp.set_cookie(
+        SESSION_COOKIE, _session_value(), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax",
+        # Behind nginx uvicorn sees https via X-Forwarded-Proto; on the Mac's plain http the
+        # cookie must not be Secure or the browser would drop it.
+        secure=request.url.scheme == "https",
+    )
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
 
 
 # --- API ---------------------------------------------------------------------

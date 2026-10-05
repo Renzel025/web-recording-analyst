@@ -11,7 +11,7 @@ teammates in Lark   --open link--> https://DOMAIN/r/<id>
 
 - **Region:** use an international region (Singapore, Hong Kong, ...). From mainland China
   regions, api.anthropic.com and the Claude Code installer are blocked, and a public domain
-  needs ICP filing. `bot-dev` (47.84.198.163) and `bot-prod` (8.219.139.155) are Singapore IPs.
+  needs ICP filing. `bot-dev` and `bot-prod` are in Singapore.
 - **Security group:** open inbound TCP 80 and 443 (ECS console → the instance → Security
   Groups → Inbound). Port 8020 stays closed; nginx reaches it locally.
 - **OS packages:** on Alibaba Cloud Linux / CentOS use `dnf`/`yum` instead of `apt-get`:
