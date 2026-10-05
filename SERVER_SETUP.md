@@ -300,25 +300,84 @@ curl -s -o /dev/null -w '%{http_code}\n' https://recordings.mybot.ink/          
 
 ## Log in with Lark (one-time setup)
 
-People log in with their Lark account. Only your company's Lark organization gets in.
-You don't need a bot. Login only uses the app's ID, secret and redirect URL.
+People log in with their Lark account, and only your company's Lark organization gets
+in. This is how it was set up on bot-dev, including the problems we hit.
 
-1. Open the Lark Developer Console (open.larksuite.com) and **create a custom app**
-   (self-built app). If it asks for a capability, pick **Web App**, not Bot.
-2. **Credentials & Basic Info:** copy the **App ID** and **App Secret** into the
-   server's `.env` as `LARK_APP_ID` and `LARK_APP_SECRET`.
-3. **Security Settings → Redirect URLs:** add
-   `https://recordings.mybot.ink/auth/lark/callback`. It must match
-   `PUBLIC_BASE_URL` + `/auth/lark/callback` exactly.
-4. **Publish** the app inside your organization. Depending on your company's settings,
-   a Lark admin may need to approve it.
-5. Restart: `systemctl restart recording-analyst`.
-6. Open the site and click **Log in with Lark**. The first time, the page says
-   `add LARK_TENANT_KEY=... to .env`. Paste that line into `.env` and restart again.
-   From then on, only your organization can log in.
+### How the login works
+
+```
+Log in with Lark ──▶ Lark "Authorize" page ──▶ /auth/lark/callback?code=... ──▶ app asks Lark
+(our login page)     (accounts.larksuite.com)  (back on our site)            who this is, checks
+                                                                             the organization,
+                                                                             sets a 30-day cookie
+```
+
+| Word | What it is |
+|---|---|
+| **App ID / App Secret** | The Lark app's login credentials (`cli_...` and a secret). Any Lark custom app has them, including a bot. |
+| **Redirect URL** = **callback** | The address Lark sends people back to after Authorize: `https://recordings.mybot.ink/auth/lark/callback`. Lark calls it a redirect URL, the app calls it the callback. They're the same thing. |
+| **Tenant key** | Your company's ID in Lark. The app only lets in people whose tenant key matches `LARK_TENANT_KEY`. It isn't shown in the Lark console, so the app shows it on the first login. |
+| **Availability** | Which people in your company may use the Lark app. Anyone outside it can't log in. |
+
+### Steps
+
+1. **Choose the Lark app.** In the Lark Developer Console (open.larksuite.com), a **bot
+   is already a custom app**, so an existing bot works. We used **"PC/web - Hourly bot"**.
+   A separate app (e.g. "Recordings Login") keeps the website login apart from the alert
+   bot, and is the better choice if you can create one.
+
+2. **Copy the credentials.** App → **Credentials & Basic Info** → copy the **App ID** and
+   **App Secret** into the server's `.env`:
+   ```bash
+   LARK_APP_ID=cli_...
+   LARK_APP_SECRET=...
+   LARK_TENANT_KEY=          # leave empty for now
+   ```
+   Then run `systemctl restart recording-analyst`.
+
+3. **Add the redirect URL.** App → **Security Settings** → **Redirect URLs**. Paste
+   `https://recordings.mybot.ink/auth/lark/callback` and **click Add**. Make sure it
+   **appears in the list below the box**. Typing it in the box isn't enough: that's
+   what caused our error 20029. It must equal `PUBLIC_BASE_URL` + `/auth/lark/callback`,
+   with `https`, no trailing `/`, and no spaces.
+
+4. **IP allowlist** (same page): if it's **empty, leave it**. If it has IPs, add the
+   server's public IP, or the login fails right after Authorize. To find that IP, on the
+   server run: `curl -s https://api.ipify.org`.
+
+5. **Get the tenant key.** Open the site → **Log in with Lark** → **Authorize**. The page
+   says `Almost set up: add LARK_TENANT_KEY=... to .env and restart.` Put that value in
+   `.env` and restart. The value is also in the log:
+   `journalctl -u recording-analyst | grep LARK_TENANT_KEY`.
+
+6. **Let colleagues in (availability).** App → **Version Management & Release** →
+   **Create a version** → **Availability**: **All members**, or the team that should see
+   recordings → **Save** → **Publish**. A Lark admin may need to approve it. Without
+   this, colleagues see *"You don't have the access to \"<app name>\""* on Lark's page,
+   before ever reaching the site. If the app is a bot used elsewhere, widening its
+   availability affects that bot too. That's another reason to use a separate app.
+
+7. **Check it** from any computer:
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://recordings.mybot.ink/                 # 303 (to login)
+   curl -s -o /dev/null -w '%{http_code}\n' https://recordings.mybot.ink/api/recordings/x # 401
+   ```
+   Then have one colleague open the link and log in.
 
 Each login and each recording view is written to the log with the person's name:
 `journalctl -u recording-analyst | grep -E "login:|view:"`.
+
+### Lark login errors we hit
+
+| What you see | Cause | Fix |
+|---|---|---|
+| `client_id request is invalid` (20028) | `LARK_APP_ID` is wrong or not set | Copy the App ID again from Credentials & Basic Info, then restart |
+| `Invalid redirect URL` (20029) | The callback isn't in the app's Redirect URL **list** | Step 3: click **Add** and check it appears in the list |
+| `You don't have the access to "<app>"` | That person is outside the app's availability | Step 6, or click **Select** on an account that has access |
+| `Almost set up: add LARK_TENANT_KEY=...` | First login, tenant key not set yet | Step 5 |
+| `Only members of our Lark organisation can open recordings` | The account is in a different Lark organization | Expected. They aren't let in |
+| `Couldn't finish the Lark login` | The server couldn't reach Lark, or the IP allowlist blocked it | Step 4. Details: `journalctl -u recording-analyst -n 50` |
+| Site answers `Locked: set LARK_APP_ID...` (503) | `LARK_APP_ID`/`LARK_APP_SECRET` empty | Step 2 |
 
 ---
 
