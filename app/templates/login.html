@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card login">
   <h1>Log in</h1>
-  <p class="muted">Recordings are for our team only. Log in with your Lark account.</p>
+  <p class="muted">Log in with your Lark account.</p>
   {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
   {% if ready %}
     <a class="lark-btn" href="/auth/lark?next={{ next|urlencode }}">
